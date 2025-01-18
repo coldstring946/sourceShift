@@ -1,0 +1,129 @@
+import os
+import re
+import time
+from selenium import webdriver
+from selenium.webdriver.edge.options import Options as EdgeOptions
+from selenium.webdriver.common.by import By
+from selenium.webdriver.edge.service import Service as EdgeService
+from webdriver_manager.microsoft import EdgeChromiumDriverManager
+from datetime import datetime, timedelta
+import random
+import schedule
+
+def save_text_to_file(folder_path, text, url):
+    now = datetime.now()
+    time_str = now.strftime("%H%M")
+    date_str = now.strftime("%Y%m%d")
+    filename = url.split("/")[-1]
+    full_filename = f"{filename}_{date_str}_{time_str}.txt"
+    file_path = os.path.join(folder_path, full_filename)
+
+    with open(file_path, "a", encoding="utf-8") as file:
+        file.write(text + "\n\n")
+
+# Function to set up Selenium WebDriver
+def setup_selenium_driver():
+    # Set up Edge in headless mode
+    edge_options = EdgeOptions()
+    edge_options.add_argument("--headless")
+    edge_options.add_argument("--disable-gpu")  # Disable GPU hardware acceleration if necessary
+    edge_options.add_argument("--window-size=1920x1080")  # Set the window size
+    service = EdgeService(EdgeChromiumDriverManager().install())
+    return webdriver.Edge(service=service, options=edge_options)
+
+def get_numbered_links(url, driver):
+    try:
+        driver.get(url)
+        time.sleep(2)  # Sleep for dynamic page content to load (if needed)
+        links_elements = driver.find_elements(By.TAG_NAME, 'a')
+        all_links = {link.get_attribute('href') for link in links_elements if
+                     link.get_attribute('href') and re.search(r'/news/articles/\w+$', link.get_attribute('href'))}
+        return list(all_links)
+    except Exception as e:
+        print("An error occurred while fetching links:", e)
+        return []
+
+def extract_data_from_url(url, driver, folder_path):
+    try:
+        print(f"Fetching data from {url}...")
+        driver.get(url)
+        time.sleep(2)  # Sleep for dynamic page content to load (if needed)
+
+        print("Parsing content...")
+        title = driver.find_element(By.TAG_NAME, 'h1').text if driver.find_elements(By.TAG_NAME, 'h1') else "No title found"
+
+        # Extract last updated time
+        time_element = driver.find_element(By.CSS_SELECTOR, 'time[data-testid="timestamp"]') if driver.find_elements(
+            By.CSS_SELECTOR, 'time[data-testid="timestamp"]') else None
+        last_updated_text = time_element.text if time_element else "No update time found"
+        last_updated_datetime = time_element.get_attribute('datetime') if time_element else "No date/time found"
+
+        # Extract paragraphs
+        paragraphs = driver.find_elements(By.TAG_NAME, 'p')
+        paragraph_text = "\n".join(p.text for p in paragraphs)
+
+        print(f"Data extracted from {url}")
+
+        # Save the extracted data to a file
+        text_content = f"Title: {title}\nLast updated: {last_updated_text}\nLast updated on: {last_updated_datetime}\n{paragraph_text}"
+        save_text_to_file(folder_path, text_content, url)
+
+        return title, last_updated_text, last_updated_datetime, paragraph_text
+
+    except Exception as err:
+        print(f"An error occurred while fetching data from {url}: {err}")
+        return "", "", "", ""
+
+# New function to run at randomized times
+def run_at_random_times(time_strings, task, randomness=300):
+    for time_str in time_strings:
+        now = datetime.now()
+        scheduled_time = datetime.strptime(time_str, '%H:%M').replace(year=now.year, month=now.month, day=now.day)
+        offset = timedelta(seconds=random.randint(-randomness, randomness))
+        final_time = (scheduled_time + offset).time()
+        schedule.every().day.at(final_time.strftime('%H:%M:%S')).do(task)
+
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+
+# Main logic encapsulated in a function
+def main_logic():
+    folder_path = r"C:\Users\Hunte\OneDrive - Inqusiv\Projects\Media accountability\BBC news\automation\VSCode"
+    start_time = datetime.now()
+    folder_timestamp = start_time.strftime('%Y-%m-%d %H:%M:%S')
+    print(f"Process started at {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Accessing folder '{folder_path}' at {folder_timestamp}")
+
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+
+    driver = setup_selenium_driver()
+    target_url = 'http://www.bbc.co.uk/news'
+    numbered_links = get_numbered_links(target_url, driver)
+    processed_links = set()
+
+    for link in numbered_links:
+        if link not in processed_links:
+            title, last_updated_text, last_updated_datetime, paragraph_text = extract_data_from_url(link, driver, folder_path)
+            processed_links.add(link)
+            print(f"Processed: {title}")
+        else:
+            print(f"Skipping already processed link: {link}")
+
+    # Print the number of URLs processed
+    print(f"Total URLs processed: {len(processed_links)}")
+
+    # Close the Selenium WebDriver
+    driver.quit()
+    end_time = datetime.now()
+    print(f"Process finished at {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    if len(processed_links) < 20:
+        print(f"***ALERT: Only {len(processed_links)} URLs processed***")
+
+# Example key times to run the main logic
+key_times = ['06:00', '07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00', '22:00']  # Specify your desired key times here
+
+# Schedule the main logic to run at randomized times
+if __name__ == "__main__":
+    run_at_random_times(key_times, main_logic, randomness=300)  # 300 seconds = +/- 5 minutes
